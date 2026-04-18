@@ -12,8 +12,12 @@ import com.shop_inventory.repository.ItemRepository;
 import com.shop_inventory.repository.LocationRepository;
 import com.shop_inventory.repository.PriceHistoryRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -25,6 +29,10 @@ public class ItemService {
     private final LocationRepository locationRepository;
     private final CategoryRepository categoryRepository;
     private final PriceHistoryRepository priceHistoryRepository;
+    private final CloudinaryService cloudinaryService;
+
+    // Base URL for photo access
+    private static final String PHOTO_BASE_URL = "http://localhost:8080/uploads/items/";
 
     public List<ItemResponse> findAll() {
         return itemRepository.findAll()
@@ -35,15 +43,40 @@ public class ItemService {
         return toResponse(getItemOrThrow(id));
     }
 
-    public ItemResponse save(ItemRequest request) {
+    public ItemResponse save(ItemRequest request,
+                             MultipartFile photo) throws IOException {
         Item item = toEntity(request, new Item());
-        return toResponse(itemRepository.save(item));
+        item = itemRepository.save(item); // save first to get ID
+
+        if (photo != null && !photo.isEmpty()) {
+            String url = cloudinaryService.uploadImage(photo, item.getId());
+            String publicId = cloudinaryService.buildPublicId(item.getId());
+            item.setPhotoUrl(url);
+            item.setPhotoPublicId(publicId);
+            item = itemRepository.save(item);
+        }
+
+        return toResponse(item);
     }
 
 
+    public void deletePhoto(Long id) {
+        Item item = getItemOrThrow(id);
+        if (item.getPhotoPublicId() != null) {
+            cloudinaryService.deleteImage(item.getPhotoPublicId());
+        }
+        item.setPhotoUrl(null);
+        item.setPhotoPublicId(null);
+        itemRepository.save(item);
+    }
 
     public void delete(Long id) {
-        itemRepository.delete(getItemOrThrow(id));
+        Item item = getItemOrThrow(id);
+        // Delete from Cloudinary before removing from DB
+        if (item.getPhotoPublicId() != null) {
+            cloudinaryService.deleteImage(item.getPhotoPublicId());
+        }
+        itemRepository.delete(item);
     }
 
     public List<ItemResponse> search(String query) {
@@ -84,12 +117,18 @@ public class ItemService {
             Location loc = locationRepository.findById(req.getLocationId())
                     .orElseThrow(() -> new ResourceNotFoundException("Location not found"));
             item.setLocation(loc);
+        } else {
+            item.setLocation(null);
         }
+
         if (req.getCategoryId() != null) {
             Category cat = categoryRepository.findById(req.getCategoryId())
                     .orElseThrow(() -> new ResourceNotFoundException("Category not found"));
             item.setCategory(cat);
+        } else {
+            item.setCategory(null);
         }
+
         return item;
     }
 
@@ -101,6 +140,8 @@ public class ItemService {
         res.setQuantity(item.getQuantity());
         res.setBuyingPrice(item.getBuyingPrice());
         res.setSellingPrice(item.getSellingPrice());
+        res.setPhotoUrl(item.getPhotoUrl());           // direct Cloudinary URL
+        res.setPhotoPublicId(item.getPhotoPublicId());
         res.setCreatedAt(item.getCreatedAt());
         res.setUpdatedAt(item.getUpdatedAt());
 
@@ -109,36 +150,49 @@ public class ItemService {
             res.setLocationDisplay("Aisle " + l.getAisle()
                     + " · Rack " + l.getRack()
                     + " · " + l.getShelf());
+            res.setLocationId(l.getId());      // ← ADD
         }
+
         if (item.getCategory() != null) {
             res.setCategoryName(item.getCategory().getName());
+            res.setCategoryId(item.getCategory().getId());  // ← ADD
         }
+
         return res;
     }
 
-    // Update your update() method:
-    public ItemResponse update(Long id, ItemRequest request) {
+    public ItemResponse update(Long id, ItemRequest request,
+                               MultipartFile photo) throws IOException {
         Item existing = getItemOrThrow(id);
 
-        // Record price history if price changed
-        boolean priceChanged = !existing.getBuyingPrice().equals(request.getBuyingPrice())
-                || !existing.getSellingPrice().equals(request.getSellingPrice());
+        // Track price history if price changed
+        boolean priceChanged =
+                !existing.getBuyingPrice().equals(request.getBuyingPrice()) ||
+                        !existing.getSellingPrice().equals(request.getSellingPrice());
 
         if (priceChanged) {
             PriceHistory history = new PriceHistory();
             history.setItem(existing);
             history.setBuyingPrice(request.getBuyingPrice());
             history.setSellingPrice(request.getSellingPrice());
-
-            // Get current logged-in user
             String username = SecurityContextHolder.getContext()
                     .getAuthentication().getName();
             history.setChangedBy(username);
             priceHistoryRepository.save(history);
         }
 
+        // Upload new photo — Cloudinary auto-replaces old one
+        // because we use the same public_id (item_<id>)
+        if (photo != null && !photo.isEmpty()) {
+            String url = cloudinaryService.uploadImage(photo, id);
+            String publicId = cloudinaryService.buildPublicId(id);
+            existing.setPhotoUrl(url);
+            existing.setPhotoPublicId(publicId);
+        }
+
         Item updated = toEntity(request, existing);
         return toResponse(itemRepository.save(updated));
     }
+
 
 }

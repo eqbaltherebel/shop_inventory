@@ -37,6 +37,13 @@ public class Item {
     @DecimalMin(value = "0.0", message = "Selling price cannot be negative")
     private Double sellingPrice;
 
+    @Column(length = 500)
+    private String photoUrl;       // full Cloudinary HTTPS URL
+
+    private String photoPublicId;  // e.g. hardware-shop/items/item_42
+    // used to delete from Cloudinary
+
+
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "location_id")
     private Location location;

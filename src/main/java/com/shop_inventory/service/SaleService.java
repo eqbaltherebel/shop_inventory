@@ -7,10 +7,8 @@ import com.shop_inventory.dto.response.SaleItemResponse;
 import com.shop_inventory.dto.response.SaleResponse;
 import com.shop_inventory.dto.response.TopItemResponse;
 import com.shop_inventory.exception.ResourceNotFoundException;
-import com.shop_inventory.model.Item;
-import com.shop_inventory.model.Sale;
-import com.shop_inventory.model.SaleItem;
-import com.shop_inventory.model.SaleStatus;
+import com.shop_inventory.model.*;
+import com.shop_inventory.repository.CustomerRepository;
 import com.shop_inventory.repository.ItemRepository;
 import com.shop_inventory.repository.SaleItemRepository;
 import com.shop_inventory.repository.SaleRepository;
@@ -32,6 +30,7 @@ public class SaleService {
     private final SaleRepository saleRepository;
     private final SaleItemRepository saleItemRepository;
     private final ItemRepository itemRepository;
+    private final CustomerRepository customerRepository;
 
     private static final DateTimeFormatter DATE_FMT =
             DateTimeFormatter.ofPattern("dd MMM yyyy");
@@ -40,21 +39,54 @@ public class SaleService {
 
     // ── Create Sale ───────────────────────────────────────────
 
+    // ── Update createSale() to link customer ──────────────────────
     @Transactional
     public SaleResponse createSale(SaleRequest request) {
         Sale sale = new Sale();
-        sale.setCustomerName(request.getCustomerName());
-        sale.setCustomerPhone(request.getCustomerPhone());
         sale.setPaymentMethod(request.getPaymentMethod());
         sale.setNotes(request.getNotes());
         sale.setStatus(SaleStatus.COMPLETED);
         sale.setInvoiceNumber(generateInvoiceNumber());
 
-        // Get logged-in user
         String username = SecurityContextHolder.getContext()
                 .getAuthentication().getName();
         sale.setSoldBy(username);
 
+        // ── Link or create customer ───────────────────────────────
+        if (request.getCustomerId() != null) {
+            // Link to existing customer
+            Customer customer = customerRepository
+                    .findById(request.getCustomerId())
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Customer not found"));
+            sale.setCustomer(customer);
+            sale.setCustomerName(customer.getName());
+            sale.setCustomerPhone(customer.getPhone());
+
+        } else if (request.getCustomerName() != null
+                && !request.getCustomerName().isBlank()) {
+
+            // Auto-create customer if phone matches existing one
+            if (request.getCustomerPhone() != null
+                    && !request.getCustomerPhone().isBlank()) {
+
+                Customer customer = customerRepository
+                        .findByPhone(request.getCustomerPhone())
+                        .orElseGet(() -> {
+                            Customer c = new Customer();
+                            c.setName(request.getCustomerName());
+                            c.setPhone(request.getCustomerPhone());
+                            c.setAddress(request.getCustomerAddress());
+                            return customerRepository.save(c);
+                        });
+                sale.setCustomer(customer);
+            }
+
+            sale.setCustomerName(request.getCustomerName());
+            sale.setCustomerPhone(request.getCustomerPhone());
+        }
+
+        // ── Process items (same as before) ────────────────────────
         List<SaleItem> saleItems = new ArrayList<>();
         double totalAmount = 0;
         double totalCost   = 0;
@@ -64,7 +96,6 @@ public class SaleService {
                     .orElseThrow(() -> new ResourceNotFoundException(
                             "Item not found: " + sir.getItemId()));
 
-            // Check stock
             if (item.getQuantity() < sir.getQuantity()) {
                 throw new IllegalStateException(
                         "Insufficient stock for '" + item.getName() +
@@ -75,7 +106,8 @@ public class SaleService {
             double priceAtSale = item.getSellingPrice();
             double costAtSale  = item.getBuyingPrice();
             double subtotal    = priceAtSale * sir.getQuantity();
-            double itemProfit  = (priceAtSale - costAtSale) * sir.getQuantity();
+            double itemProfit  = (priceAtSale - costAtSale)
+                    * sir.getQuantity();
 
             SaleItem si = new SaleItem();
             si.setSale(sale);
@@ -90,7 +122,6 @@ public class SaleService {
             totalAmount += subtotal;
             totalCost   += costAtSale * sir.getQuantity();
 
-            // Deduct from inventory
             item.setQuantity(item.getQuantity() - sir.getQuantity());
             itemRepository.save(item);
         }
@@ -100,8 +131,20 @@ public class SaleService {
         sale.setProfit(totalAmount - totalCost);
         sale.setSaleItems(saleItems);
 
-        Sale saved = saleRepository.save(sale);
-        return toResponse(saved);
+        return toPublicResponse(saleRepository.save(sale));
+    }
+
+    // ── Search sales by customer ───────────────────────────────────
+    public List<SaleResponse> searchByCustomer(String query) {
+        return saleRepository.searchByCustomer(query)
+                .stream()
+                .map(this::toPublicResponse)
+                .collect(Collectors.toList());
+    }
+
+    // ── Make toResponse public so CustomerService can use it ──────
+    public SaleResponse toPublicResponse(Sale sale) {
+        return toResponse(sale);
     }
 
     // ── Get All Sales ─────────────────────────────────────────
@@ -250,12 +293,11 @@ public class SaleService {
         return String.format("INV-%s-%03d", datePart, count);
     }
 
+    // ── Update toResponse() to include customer fields
     private SaleResponse toResponse(Sale sale) {
         SaleResponse res = new SaleResponse();
         res.setId(sale.getId());
         res.setInvoiceNumber(sale.getInvoiceNumber());
-        res.setCustomerName(sale.getCustomerName());
-        res.setCustomerPhone(sale.getCustomerPhone());
         res.setTotalAmount(sale.getTotalAmount());
         res.setTotalCost(sale.getTotalCost());
         res.setProfit(sale.getProfit());
@@ -264,6 +306,17 @@ public class SaleService {
         res.setStatus(sale.getStatus().name());
         res.setSoldBy(sale.getSoldBy());
         res.setSaleDate(sale.getSaleDate());
+
+        // Customer fields
+        if (sale.getCustomer() != null) {
+            res.setCustomerId(sale.getCustomer().getId());
+            res.setCustomerName(sale.getCustomer().getName());
+            res.setCustomerPhone(sale.getCustomer().getPhone());
+            res.setCustomerAddress(sale.getCustomer().getAddress());
+        } else {
+            res.setCustomerName(sale.getCustomerName());
+            res.setCustomerPhone(sale.getCustomerPhone());
+        }
 
         if (sale.getSaleItems() != null) {
             res.setSaleItems(sale.getSaleItems().stream()

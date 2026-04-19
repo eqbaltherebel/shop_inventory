@@ -57,4 +57,11 @@ public class SaleController {
             @RequestParam String to) {
         return saleService.getReport(from, to);
     }
+
+    // GET /api/sales/search?query=rahul
+    @GetMapping("/search")
+    public List<SaleResponse> searchByCustomer(
+            @RequestParam String query) {
+        return saleService.searchByCustomer(query);
+    }
 }

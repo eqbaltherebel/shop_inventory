@@ -16,6 +16,23 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
     List<Sale> findBySaleDateBetweenOrderBySaleDateDesc(
             LocalDateTime from, LocalDateTime to);
 
+    // All sales of a specific customer
+    List<Sale> findByCustomerIdOrderBySaleDateDesc(Long customerId);
+
+    // Search sales by customer name, phone, address
+    @Query("""
+        SELECT s FROM Sale s
+        LEFT JOIN s.customer c
+        WHERE
+        LOWER(s.customerName)  LIKE LOWER(CONCAT('%', :query, '%')) OR
+        LOWER(s.customerPhone) LIKE LOWER(CONCAT('%', :query, '%')) OR
+        LOWER(c.name)          LIKE LOWER(CONCAT('%', :query, '%')) OR
+        LOWER(c.phone)         LIKE LOWER(CONCAT('%', :query, '%')) OR
+        LOWER(c.address)       LIKE LOWER(CONCAT('%', :query, '%'))
+        ORDER BY s.saleDate DESC
+        """)
+    List<Sale> searchByCustomer(@Param("query") String query);
+
     // Today's sales
     @Query("SELECT s FROM Sale s WHERE s.saleDate >= :startOfDay " +
             "AND s.saleDate <= :endOfDay ORDER BY s.saleDate DESC")

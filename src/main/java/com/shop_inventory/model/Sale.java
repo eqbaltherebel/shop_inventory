@@ -20,6 +20,11 @@ public class Sale {
     @Column(nullable = false, unique = true)
     private String invoiceNumber;   // e.g. INV-20260419-001
 
+    // ── Link to Customer entity ──────────────────────────────
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "customer_id")
+    private Customer customer;
+
     private String customerName;
     private String customerPhone;
 

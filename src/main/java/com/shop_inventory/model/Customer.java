@@ -31,6 +31,12 @@ public class Customer {
     @OneToMany(mappedBy = "customer", fetch = FetchType.LAZY)
     private List<Sale> sales;
 
+    private Double creditLimit = 0.0;   // 0 means no limit
+
+    private String tags;                // e.g. "trusted,vip"
+
+    private String notes;               // shopkeeper notes
+
     @CreationTimestamp
     private LocalDateTime createdAt;
 

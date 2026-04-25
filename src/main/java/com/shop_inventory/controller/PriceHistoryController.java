@@ -8,7 +8,6 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/price-history")
-@CrossOrigin(origins = "http://localhost:4200")
 @RequiredArgsConstructor
 public class PriceHistoryController {
 

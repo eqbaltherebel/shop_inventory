@@ -33,6 +33,7 @@ public class AuthController {
         }
     }
 
+   // Adding comment
     @PostMapping("/register")
     public AuthResponse register(@RequestBody LoginRequest request) {
         return authService.register(request);
